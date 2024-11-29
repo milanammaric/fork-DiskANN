@@ -27,7 +27,19 @@
 #endif
 #endif
 
+#include <dlfcn.h>
+
 #define WARMUP false
+
+void dump_quartz_stats() {
+    static void (*stats_report)() = reinterpret_cast<void(*)()>(dlsym(RTLD_DEFAULT, "stats_report"));
+    if (stats_report != nullptr) {
+        diskann::cout << "Report Quartz statistics: " << std::endl;
+        stats_report();
+    } else {
+        diskann::cout << "Does not report Quartz statistics: " << std::endl;
+    }
+}
 
 namespace po = boost::program_options;
 
@@ -125,7 +137,7 @@ int search_disk_index(diskann::Metric &metric, const std::string &index_path_pre
     // if (num_nodes_to_cache > 0)
     //     _pFlashIndex->generate_cache_list_from_sample_queries(warmup_query_file, 15, 6, num_nodes_to_cache,
     //     num_threads, node_list);
-    _pFlashIndex->load_cache_list(node_list);
+    _pFlashIndex->cached_beam_search(node_list);
     node_list.clear();
     node_list.shrink_to_fit();
 
@@ -172,6 +184,8 @@ int search_disk_index(diskann::Metric &metric, const std::string &index_path_pre
         }
         diskann::cout << "..done" << std::endl;
     }
+
+    dump_quartz_stats();
 
     diskann::cout.setf(std::ios_base::fixed, std::ios_base::floatfield);
     diskann::cout.precision(2);
@@ -278,8 +292,8 @@ int search_disk_index(diskann::Metric &metric, const std::string &index_path_pre
             best_recall = std::max(recall, best_recall);
         }
 
-        diskann::cout << std::setw(6) << L << std::setw(12) << optimized_beamwidth << std::setw(16) << qps
-                      << std::setw(16) << mean_latency << std::setw(16) << latency_999 << std::setw(16) << mean_ios
+        diskann::cout << std::setw(6) << L << std::setw(12) << optimized_beamwidth << std::setw(16) << "QPSVAL: " << qps
+                      << std::setw(16) << mean_latency << std::setw(16) << latency_999 << std::setw(16) << "IOVAL: " << mean_ios
                       << std::setw(16) << mean_cpuus;
         if (calc_recall_flag)
         {

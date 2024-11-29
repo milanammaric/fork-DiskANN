@@ -418,7 +418,10 @@ void PQFlashIndex<T, LabelT>::cache_bfs_levels(uint64_t num_nodes_to_cache, std:
         diskann::cout << "Level: " << lvl << std::flush;
         bool finish_flag = false;
 
-        uint64_t BLOCK_SIZE = 1024;
+        // uint64_t BLOCK_SIZE = 1024;
+        // Decrease the caching step BLOCK_SIZE from 1024 to 8 to mitigate 
+        // io_getevents syscall interruptions by the Quartz emulator
+        uint64_t BLOCK_SIZE = 8;
         uint64_t nblocks = DIV_ROUND_UP(nodes_to_expand.size(), BLOCK_SIZE);
         for (size_t block = 0; block < nblocks && !finish_flag; block++)
         {

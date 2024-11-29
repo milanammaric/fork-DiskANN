@@ -8,6 +8,7 @@
 #include <iostream>
 #include "tsl/robin_map.h"
 #include "utils.h"
+#include <timer.h>
 #define MAX_EVENTS 1024
 
 namespace
@@ -66,16 +67,25 @@ void execute_io(io_context_t ctx, int fd, std::vector<AlignedRead> &read_reqs, u
             else
             {
                 // wait on io_getevents
-                ret = io_getevents(ctx, (int64_t)n_ops, (int64_t)n_ops, evts.data(), nullptr);
+		        size_t num_retries = 0;
+                double last_elapsed_second = 0.0;
+		        do {
+                    // diskann::Timer timer;
+                    ret = io_getevents(ctx, (int64_t)n_ops, (int64_t)n_ops, evts.data(), nullptr);
+                    // last_elapsed_second = timer.elapsed_seconds();
+		        	++num_retries;
+		        } while (ret != (int64_t)n_ops && num_retries < 10);
                 // if requests didn't complete
                 if (ret != (int64_t)n_ops)
                 {
                     std::cerr << "io_getevents() failed; returned " << ret << ", expected=" << n_ops
-                              << ", ernno=" << errno << "=" << ::strerror(-ret) << ", try #" << n_tries + 1;
+                              << ", ernno=" << errno << "=" << ::strerror(-ret) << ", try #" << n_tries + 1 << ", retry #" << num_retries << ", timer elapsed = " << last_elapsed_second << "s";
                     exit(-1);
                 }
                 else
                 {
+                    // std::cerr << "io_getevents() succeded; returned " << ret << ", expected=" << n_ops
+                    //           << ", ernno=" << errno << "=" << ::strerror(-ret) << ", try #" << n_tries + 1 << ", retry #" << num_retries << ", timer elapsed = " << last_elapsed_second << "s";
                     break;
                 }
             }
