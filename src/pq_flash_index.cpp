@@ -67,10 +67,9 @@ template <typename T, typename LabelT> PQFlashIndex<T, LabelT>::~PQFlashIndex()
     if (_centroid_data != nullptr)
         aligned_free(_centroid_data);
     // delete backing bufs for nhood and coord cache
-    if (_nhood_cache_buf != nullptr)
+    if (_node_cache != nullptr)
     {
-        delete[] _nhood_cache_buf;
-        diskann::aligned_free(_coord_cache_buf);
+        delete _node_cache;
     }
 
     if (_load_flag)
@@ -206,50 +205,11 @@ std::vector<bool> PQFlashIndex<T, LabelT>::read_nodes(const std::vector<uint32_t
 
 template <typename T, typename LabelT> void PQFlashIndex<T, LabelT>::load_cache_list(std::vector<uint32_t> &node_list)
 {
-    diskann::cout << "Loading the cache list into memory.." << std::flush;
-    size_t num_cached_nodes = node_list.size();
-
-    // Allocate space for neighborhood cache
-    _nhood_cache_buf = new uint32_t[num_cached_nodes * (_max_degree + 1)];
-    memset(_nhood_cache_buf, 0, num_cached_nodes * (_max_degree + 1));
-
-    // Allocate space for coordinate cache
-    size_t coord_cache_buf_len = num_cached_nodes * _aligned_dim;
-    diskann::alloc_aligned((void **)&_coord_cache_buf, coord_cache_buf_len * sizeof(T), 8 * sizeof(T));
-    memset(_coord_cache_buf, 0, coord_cache_buf_len * sizeof(T));
-
-    size_t BLOCK_SIZE = 8;
-    size_t num_blocks = DIV_ROUND_UP(num_cached_nodes, BLOCK_SIZE);
-    for (size_t block = 0; block < num_blocks; block++)
-    {
-        size_t start_idx = block * BLOCK_SIZE;
-        size_t end_idx = (std::min)(num_cached_nodes, (block + 1) * BLOCK_SIZE);
-
-        // Copy offset into buffers to read into
-        std::vector<uint32_t> nodes_to_read;
-        std::vector<T *> coord_buffers;
-        std::vector<std::pair<uint32_t, uint32_t *>> nbr_buffers;
-        for (size_t node_idx = start_idx; node_idx < end_idx; node_idx++)
-        {
-            nodes_to_read.push_back(node_list[node_idx]);
-            coord_buffers.push_back(_coord_cache_buf + node_idx * _aligned_dim);
-            nbr_buffers.emplace_back(0, _nhood_cache_buf + node_idx * (_max_degree + 1));
-        }
-
-        // issue the reads
-        auto read_status = read_nodes(nodes_to_read, coord_buffers, nbr_buffers);
-
-        // check for success and insert into the cache.
-        for (size_t i = 0; i < read_status.size(); i++)
-        {
-            if (read_status[i] == true)
-            {
-                _coord_cache.insert(std::make_pair(nodes_to_read[i], coord_buffers[i]));
-                _nhood_cache.insert(std::make_pair(nodes_to_read[i], nbr_buffers[i]));
-            }
-        }
-    }
-    diskann::cout << "..done." << std::endl;
+    // Allocate space for cache
+    _node_cache = new NodeCache<T, LabelT>(_max_degree, _aligned_dim);
+    _node_cache->load_cache_list(node_list, 0.5, std::bind(&PQFlashIndex<T, LabelT>::read_nodes, this,
+                                                          std::placeholders::_1, std::placeholders::_2,
+                                                          std::placeholders::_3));
 }
 
 #ifdef EXEC_ENV_OLS
@@ -1431,10 +1391,14 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
         {
             auto nbr = retset.closest_unexpanded();
             num_seen++;
-            auto iter = _nhood_cache.find(nbr.id);
-            if (iter != _nhood_cache.end())
+            std::optional<std::pair<uint32_t, uint32_t *> > nhood = std::nullopt;
+            if (_node_cache != nullptr)
             {
-                cached_nhoods.push_back(std::make_pair(nbr.id, iter->second));
+                nhood = _node_cache->find_nhood(nbr.id);
+            }
+            if (std::nullopt != nhood)
+            {
+                cached_nhoods.push_back(std::make_pair(nbr.id, *nhood));
                 if (stats != nullptr)
                 {
                     stats->n_cache_hits++;
@@ -1488,8 +1452,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
         // process cached nhoods
         for (auto &cached_nhood : cached_nhoods)
         {
-            auto global_cache_iter = _coord_cache.find(cached_nhood.first);
-            T *node_fp_coords_copy = global_cache_iter->second;
+            T *node_fp_coords_copy = _node_cache->find_coords(cached_nhood.first);
             float cur_expanded_dist;
             if (!_use_disk_index_pq)
             {

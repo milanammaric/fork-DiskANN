@@ -7,6 +7,7 @@
 #include "aligned_file_reader.h"
 #include "concurrent_queue.h"
 #include "neighbor.h"
+#include "node_cache.h"
 #include "parameters.h"
 #include "percentile_stats.h"
 #include "pq.h"
@@ -205,13 +206,8 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     // closest centroid as the starting point of search
     float *_centroid_data = nullptr;
 
-    // nhood_cache; the uint32_t in nhood_Cache are offsets into nhood_cache_buf
-    unsigned *_nhood_cache_buf = nullptr;
-    tsl::robin_map<uint32_t, std::pair<uint32_t, uint32_t *>> _nhood_cache;
-
-    // coord_cache; The T* in coord_cache are offsets into coord_cache_buf
-    T *_coord_cache_buf = nullptr;
-    tsl::robin_map<uint32_t, T *> _coord_cache;
+    // node cache containg neighbor lists and coordinates
+    NodeCache<T, LabelT>* _node_cache = nullptr;
 
     // thread-specific scratch
     ConcurrentQueue<SSDThreadData<T> *> _thread_data;
