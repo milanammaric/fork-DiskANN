@@ -25,31 +25,38 @@ template <typename T, typename LabelT> NodeCache<T, LabelT>::~NodeCache()
  template <typename T, typename LabelT> void NodeCache<T, LabelT>::load_cache_list(std::vector<uint32_t> &node_list, double dram_percentage, 
     std::function<std::vector<bool> (const std::vector<uint32_t> &, std::vector<T *> &, std::vector<std::pair<uint32_t, uint32_t *>> &)> read_nodes)
 {
-    diskann::cout << "Loading the cache list into memory.." << std::flush;
-    size_t num_cached_nodes_dram = (size_t)(dram_percentage * node_list.size());
-    size_t num_cached_nodes_cxl = node_list.size() - num_cached_nodes_dram;
+    if(_nhood_cache_dram_buf != nullptr || _nhood_cache_cxl_buf != nullptr)
+    {
+        std::stringstream stream;
+        stream << "Cache already loaded. Cannot load cache again.";
+        print_error_and_terminate(stream);
+    }
 
-    if (num_cached_nodes_dram > 0)
+    diskann::cout << "Loading the cache list into memory.." << std::flush;
+    _num_cached_nodes_dram = (size_t)(dram_percentage * node_list.size());
+    _num_cached_nodes_cxl = node_list.size() - _num_cached_nodes_dram;
+
+    if (_num_cached_nodes_dram > 0)
     {
          // Allocate space for neighborhood cache in dram
-        _nhood_cache_dram_buf = new uint32_t[num_cached_nodes_dram * (_max_degree + 1)];
-        memset(_nhood_cache_dram_buf, 0, num_cached_nodes_dram * (_max_degree + 1));
+        _nhood_cache_dram_buf = new uint32_t[_num_cached_nodes_dram * (_max_degree + 1)];
+        memset(_nhood_cache_dram_buf, 0, _num_cached_nodes_dram * (_max_degree + 1));
 
         // Allocate space for coordinate cache in dram
-        size_t coord_cache_buf_len = num_cached_nodes_dram * _aligned_dim;
+        size_t coord_cache_buf_len = _num_cached_nodes_dram * _aligned_dim;
         diskann::alloc_aligned((void **)&_coord_cache_dram_buf, coord_cache_buf_len * sizeof(T), 8 * sizeof(T));
         memset(_coord_cache_dram_buf, 0, coord_cache_buf_len * sizeof(T));
     }
 
     // TODO: Change this so that buffer is allocated in cxl
-    if (num_cached_nodes_cxl > 0)
+    if (_num_cached_nodes_cxl > 0)
     {
         // Allocate space for neighborhood cache in cxl
-        _nhood_cache_cxl_buf = new uint32_t[num_cached_nodes_cxl * (_max_degree + 1)];
-        memset(_nhood_cache_cxl_buf, 0, num_cached_nodes_cxl * (_max_degree + 1));
+        _nhood_cache_cxl_buf = new uint32_t[_num_cached_nodes_cxl * (_max_degree + 1)];
+        memset(_nhood_cache_cxl_buf, 0, _num_cached_nodes_cxl * (_max_degree + 1));
 
         // Allocate space for coordinate cache in cxl
-        size_t coord_cache_buf_len = num_cached_nodes_cxl * _aligned_dim;
+        size_t coord_cache_buf_len = _num_cached_nodes_cxl * _aligned_dim;
         diskann::alloc_aligned((void **)&_coord_cache_cxl_buf, coord_cache_buf_len * sizeof(T), 8 * sizeof(T));
         memset(_coord_cache_cxl_buf, 0, coord_cache_buf_len * sizeof(T));
     }
@@ -67,17 +74,19 @@ template <typename T, typename LabelT> NodeCache<T, LabelT>::~NodeCache()
         std::vector<std::pair<uint32_t, uint32_t *>> nbr_buffers;
         for (size_t node_idx = start_idx; node_idx < end_idx; node_idx++)
         {
-            if (node_idx < num_cached_nodes_dram)
+            if (node_idx < _num_cached_nodes_dram)
             {
                 nodes_to_read.push_back(node_list[node_idx]);
                 coord_buffers.push_back(_coord_cache_dram_buf + node_idx * _aligned_dim);
+                _nodes_in_dram.insert(node_idx);
                 nbr_buffers.emplace_back(0, _nhood_cache_dram_buf + node_idx * (_max_degree + 1));
             }
             else
             {
                 nodes_to_read.push_back(node_list[node_idx]);
-                coord_buffers.push_back(_coord_cache_cxl_buf + (node_idx - num_cached_nodes_dram) * _aligned_dim);
-                nbr_buffers.emplace_back(0, _nhood_cache_cxl_buf + (node_idx - num_cached_nodes_dram) * (_max_degree + 1));
+                coord_buffers.push_back(_coord_cache_cxl_buf + (node_idx - _num_cached_nodes_dram) * _aligned_dim);
+                _nodes_in_cxl.insert(node_idx);
+                nbr_buffers.emplace_back(0, _nhood_cache_cxl_buf + (node_idx - _num_cached_nodes_dram) * (_max_degree + 1));
             }
 
             // issue the reads
@@ -95,7 +104,12 @@ template <typename T, typename LabelT> NodeCache<T, LabelT>::~NodeCache()
         }
     }
     diskann::cout << "..done." << std::endl;
-}    
+};
+
+template <typename T, typename LabelT> void NodeCache<T, LabelT>::reload_cache_list(std::unordered_set<uint32_t> &nodes_to_store_in_dram, std::unordered_set<uint32_t> &nodes_to_store_in_cxl, 
+    std::function<std::vector<bool> (const std::vector<uint32_t> &, std::vector<T *> &, std::vector<std::pair<uint32_t, uint32_t *>> &)> read_nodes) {
+    // TODO: Implement this function
+};
 
 template <typename T, typename LabelT> std::optional<std::pair<uint32_t, uint32_t *> > NodeCache<T, LabelT>::find_nhood(uint32_t node_id)
 {

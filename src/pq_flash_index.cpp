@@ -67,9 +67,9 @@ template <typename T, typename LabelT> PQFlashIndex<T, LabelT>::~PQFlashIndex()
     if (_centroid_data != nullptr)
         aligned_free(_centroid_data);
     // delete backing bufs for nhood and coord cache
-    if (_node_cache != nullptr)
+    if (_cache != nullptr)
     {
-        delete _node_cache;
+        delete _cache;
     }
 
     if (_load_flag)
@@ -206,8 +206,8 @@ std::vector<bool> PQFlashIndex<T, LabelT>::read_nodes(const std::vector<uint32_t
 template <typename T, typename LabelT> void PQFlashIndex<T, LabelT>::load_cache_list(std::vector<uint32_t> &node_list)
 {
     // Allocate space for cache
-    _node_cache = new NodeCache<T, LabelT>(_max_degree, _aligned_dim);
-    _node_cache->load_cache_list(node_list, 0.5, std::bind(&PQFlashIndex<T, LabelT>::read_nodes, this,
+    _cache = new CacheManager<T, LabelT>(_max_degree, _aligned_dim);
+    _cache->load_cache_list(node_list, std::bind(&PQFlashIndex<T, LabelT>::read_nodes, this,
                                                           std::placeholders::_1, std::placeholders::_2,
                                                           std::placeholders::_3));
 }
@@ -1234,7 +1234,8 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
                                                  const uint32_t io_limit, const bool use_reorder_data,
                                                  QueryStats *stats)
 {
-
+    if (_cache) 
+        _cache->record_new_query();
     uint64_t num_sector_per_nodes = DIV_ROUND_UP(_max_node_len, defaults::SECTOR_LEN);
     if (beam_width > num_sector_per_nodes * defaults::MAX_N_SECTOR_READS)
         throw ANNException("Beamwidth can not be higher than defaults::MAX_N_SECTOR_READS", -1, __FUNCSIG__, __FILE__,
@@ -1392,9 +1393,9 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
             auto nbr = retset.closest_unexpanded();
             num_seen++;
             std::optional<std::pair<uint32_t, uint32_t *> > nhood = std::nullopt;
-            if (_node_cache != nullptr)
+            if (_cache != nullptr)
             {
-                nhood = _node_cache->find_nhood(nbr.id);
+                nhood = _cache->find_nhood(nbr.id);
             }
             if (std::nullopt != nhood)
             {
@@ -1452,7 +1453,7 @@ void PQFlashIndex<T, LabelT>::cached_beam_search(const T *query1, const uint64_t
         // process cached nhoods
         for (auto &cached_nhood : cached_nhoods)
         {
-            T *node_fp_coords_copy = _node_cache->find_coords(cached_nhood.first);
+            T *node_fp_coords_copy = _cache->find_coords(cached_nhood.first);
             float cur_expanded_dist;
             if (!_use_disk_index_pq)
             {

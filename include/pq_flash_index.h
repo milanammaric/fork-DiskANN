@@ -7,7 +7,7 @@
 #include "aligned_file_reader.h"
 #include "concurrent_queue.h"
 #include "neighbor.h"
-#include "node_cache.h"
+#include "cache_manager.h"
 #include "parameters.h"
 #include "percentile_stats.h"
 #include "pq.h"
@@ -207,7 +207,7 @@ template <typename T, typename LabelT = uint32_t> class PQFlashIndex
     float *_centroid_data = nullptr;
 
     // node cache containg neighbor lists and coordinates
-    NodeCache<T, LabelT>* _node_cache = nullptr;
+    CacheManager<T, LabelT>* _cache = nullptr;
 
     // thread-specific scratch
     ConcurrentQueue<SSDThreadData<T> *> _thread_data;
